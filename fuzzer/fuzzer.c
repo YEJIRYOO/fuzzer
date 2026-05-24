@@ -88,14 +88,21 @@ static void install_crash_handlers(void)
 
 static void queue_add(const uint8_t *data, size_t size, int from_seed)
 {
-    /* TODO: implement */
-    (void)data; (void)size; (void)from_seed;
+    if (queue_count == queue_capacity) {
+        queue_capacity = queue_capacity ? queue_capacity * 2 : 64;
+        queue = (Input *)realloc(queue, queue_capacity * sizeof(Input));
+    }
+    Input *e = &queue[queue_count++];
+    e->buf       = (uint8_t *)malloc(size ? size : 1);  /* 0바이트 malloc 회피 */
+    e->size      = size;
+    e->from_seed = from_seed;
+    if (size) memcpy(e->buf, data, size);
 }
 
 static Input *queue_pick(void)
 {
-    /* TODO: implement */
-    return NULL;
+    if (queue_count == 0) return NULL;
+    return &queue[rng_next() % queue_count];
 }
 
 /* PROVIDED mutator - do not modify. */
@@ -149,8 +156,15 @@ static void mutate(uint8_t *out, size_t *out_size,
 
 static int has_new_coverage(void)
 {
-    /* TODO: implement */
-    return 0;
+    int found = 0;
+    for (size_t i = 0; i < COV_MAP_SIZE; i++) {
+        uint8_t b = cov_classify_count(cov_map[i]);
+        if (b > virgin_map[i]) {
+            virgin_map[i] = b; // 누적 기록 갱신
+            found = 1;
+        }
+    }
+    return found;
 }
 
 /* (driver code identical to fuzzer/fuzzer.c — kept short for restore) */

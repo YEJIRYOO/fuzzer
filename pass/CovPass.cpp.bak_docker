@@ -19,7 +19,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <random>
@@ -113,7 +113,7 @@ llvmGetPassPluginInfo() {
         LLVM_PLUGIN_API_VERSION, "CovPass", LLVM_VERSION_STRING,
         [](PassBuilder &PB) {
             PB.registerOptimizerLastEPCallback(
-                [](ModulePassManager &MPM, OptimizationLevel) {
+                [](ModulePassManager &MPM, OptimizationLevel, ThinOrFullLTOPhase) {
                     MPM.addPass(CovPass());
                 });
             PB.registerPipelineParsingCallback(
