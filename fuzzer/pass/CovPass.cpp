@@ -1,0 +1,129 @@
+// =============================================================================
+// CovPass.cpp - Coverage instrumentation pass (student skeleton).
+//
+// Build target produces ./build/CovPass.so, which is loaded by clang via:
+//
+//      clang -fpass-plugin=./build/CovPass.so -O2 -c target.c -o target.o
+//
+// What you must implement is marked with `// TODO`. The plugin boilerplate
+// (registration, plugin info struct) is already wired up so that once your
+// `run()` method is correct, clang will pick the pass up automatically at
+// the end of the optimisation pipeline.
+//
+// See the assignment guide for what the runtime side
+// (`__cov_visit(uint32_t)`) must look like.
+// =============================================================================
+
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Pass.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include <random>
+
+using namespace llvm;
+
+namespace {
+
+// Random 16-bit IDs are picked at compile time, one per basic block.
+// Using a fixed seed makes builds reproducible across runs.
+static std::mt19937 gRng(0xC0FFEE);
+
+struct CovPass : PassInfoMixin<CovPass> {
+
+    // The pass entry point. Called once per Module by the LLVM pipeline.
+    // Return PreservedAnalyses::none() if you mutated the IR; ::all()
+    // means "I didn't touch anything".
+    PreservedAnalyses run(Module &M, ModuleAnalysisManager &) {
+
+        LLVMContext &Ctx = M.getContext();
+
+        // Declaration of the runtime symbol: void __cov_visit(uint32_t id).
+        // getOrInsertFunction makes sure the symbol exists in this module
+        // (creates an external declaration if needed).
+        FunctionCallee VisitFn = M.getOrInsertFunction(
+            "__cov_visit",
+            FunctionType::get(Type::getVoidTy(Ctx),
+                              {Type::getInt32Ty(Ctx)},
+                              /*isVarArg=*/false));
+
+        unsigned instrumentedBBs = 0;
+        unsigned instrumentedFns = 0;
+
+        // -----------------------------------------------------------------
+        // TODO 1.
+        //
+        // Iterate over every Function in the Module. Skip:
+        //   - external declarations (`F.isDeclaration()` returns true)
+        //   - the runtime function itself (`F.getName() == "__cov_visit"`)
+        //
+        // For each remaining Function, iterate over its BasicBlocks.
+        // For each BasicBlock, insert a call to `__cov_visit` with a
+        // freshly-generated 16-bit random ID at the start of the block.
+        //
+        // Hints:
+        //   * Use IRBuilder<> with insertion point `&*BB.getFirstInsertionPt()`
+        //     to skip past PHI nodes and landingpads, which must remain
+        //     at the top of a block.
+        //   * Build the ID constant with `IRB.getInt32(id)`.
+        //   * Emit the call with `IRB.CreateCall(VisitFn, {idConst})`.
+        //   * Pick the ID with `gRng() & 0xFFFF` so it stays in 16 bits.
+        // -----------------------------------------------------------------
+
+        // TODO: replace the loop below with the real implementation
+        for (Function &F : M) {
+            if (F.isDeclaration()) continue;          // extern 선언 스킵
+            if (F.getName() == "__cov_visit") continue;  // 자기 자신 스킵(무한 재귀 방지)
+            ++instrumentedFns;
+            for (BasicBlock &BB : F) {
+                IRBuilder<> IRB(&*BB.getFirstInsertionPt());  // PHI 노드 뒤에 삽입
+                uint32_t id = (uint32_t)(gRng() & 0xFFFF);    // 16비트 랜덤 ID
+                IRB.CreateCall(VisitFn, {IRB.getInt32(id)});
+                ++instrumentedBBs;
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Optional but useful: print a one-line summary so you can see
+        // the pass actually ran during compilation.
+        // -----------------------------------------------------------------
+        errs() << "[CovPass] instrumented " << instrumentedBBs
+               << " basic blocks across " << instrumentedFns
+               << " functions in module " << M.getName() << "\n";
+
+        return PreservedAnalyses::none();
+    }
+
+    static bool isRequired() { return true; }
+};
+
+} // namespace
+
+// -----------------------------------------------------------------------------
+// Plugin registration boilerplate. You should not need to touch this.
+// Registers the pass to run at the end of -O optimisation pipelines and
+// also under the explicit name "cov-pass" so you can use it with `opt`.
+// -----------------------------------------------------------------------------
+extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
+llvmGetPassPluginInfo() {
+    return {
+        LLVM_PLUGIN_API_VERSION, "CovPass", LLVM_VERSION_STRING,
+        [](PassBuilder &PB) {
+            PB.registerOptimizerLastEPCallback(
+                [](ModulePassManager &MPM, OptimizationLevel) {
+                    MPM.addPass(CovPass());
+                });
+            PB.registerPipelineParsingCallback(
+                [](StringRef Name, ModulePassManager &MPM,
+                   ArrayRef<PassBuilder::PipelineElement>) {
+                    if (Name == "cov-pass") {
+                        MPM.addPass(CovPass());
+                        return true;
+                    }
+                    return false;
+                });
+        }};
+}

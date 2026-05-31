@@ -1,0 +1,22 @@
+# Optional convenience launcher.
+#
+#   docker compose up --build -d
+#   docker compose exec lab bash
+#
+# Mounts ./findings on the host so per-student fuzz output survives container
+# restarts and is easy to inspect from the IDE on the Mac.
+services:
+  lab:
+    build: .
+    image: fuzz-lab:latest
+    container_name: fuzz-lab
+    # Privileged is NOT required; AFL++ env vars in the Dockerfile already
+    # neutralise the cpufreq / core_pattern checks on Docker for Mac.
+    stdin_open: true
+    tty: true
+    working_dir: /home/student
+    volumes:
+      - ./findings:/home/student/findings
+    # Comment in if you want shared memory for parallel fuzzers:
+    # shm_size: "1gb"
+    command: ["/bin/bash", "-l"]
